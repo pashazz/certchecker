@@ -1,5 +1,8 @@
 package io.github.pashazz;
 
+import com.sun.org.apache.xpath.internal.operations.Bool;
+import sun.security.provider.certpath.AdjacencyList;
+import sun.security.provider.certpath.BuildStep;
 import sun.security.provider.certpath.SunCertPathBuilderException;
 import sun.security.validator.ValidatorException;
 
@@ -18,6 +21,7 @@ import java.security.cert.*;
 import javax.security.cert.X509Certificate;
 import java.util.Date;
 import java.util.EnumSet;
+import java.util.Iterator;
 import java.util.List;
 
 public class Connector {
@@ -200,7 +204,13 @@ public class Connector {
             return;
     }  catch (SSLHandshakeException _e) {
             try {
-                throw _e.getCause();
+                if (_e.getCause() != null)
+                    throw _e.getCause();
+                else
+                {
+                    System.out.printf("SSL handshake error: %s",_e.getLocalizedMessage());
+                    return;
+                }
             } catch (ValidatorException _ve) {
                 try {
                     throw _ve.getCause();
@@ -217,7 +227,7 @@ public class Connector {
                             if (expirationDate.before(date)) {
                                 //TODO: Print certificate
                                 StringBuilder builder = new StringBuilder();
-                                builder.append("Expiration date is earlier than current date\n");
+                                builder.append("Expiration date is earlier than the current date\n");
                                 builder.append("Expiration date: ");
                                 builder.append(expirationDate);
                                 builder.append("\nCurrent date: ");
@@ -240,12 +250,53 @@ public class Connector {
 
                         }
                     }
+                    else if (reasonString == "NOT_YET_VALID") {
+
+                        System.out.println("Certificate is not yet valid");
+                        for (Certificate _cert : certs) {
+                            java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) _cert;
+                            printCertificate(cert);
+                            Date startDate = cert.getNotBefore();
+                            Date date = new Date();
+                            if (date.before(startDate)) {
+                                //TODO: Print certificate
+                                StringBuilder builder = new StringBuilder();
+                                builder.append("Start date is after the current date\n");
+                                builder.append("Start date: ");
+                                builder.append(startDate);
+                                builder.append("\nCurrent date: ");
+                                builder.append(date);
+                                builder.append('\n');
+                                System.out.println(builder.toString());
+                            }
+
+                        }
+                    }
                     else
                     {
                         System.out.println("CertPathValidator: " + reasonString);
                     }
                 } catch (SunCertPathBuilderException e) { //Might be untrusted root or self-signed
                     //Now accept connection w/o actually checking the certificate
+                    Iterator<BuildStep> iter = e.getAdjacencyList().iterator();
+                    StringBuilder builder = new StringBuilder();
+
+                    iter.forEachRemaining((buildStep ->
+                        {
+                            if (buildStep.getCertificate() != null) {
+                                if (builder.length() == 0) {
+                                    builder.append("Incomplete certificate chain: ");
+                                    builder.append(e.getLocalizedMessage());
+                                    System.out.println(builder.toString());
+                                }
+                                printCertificate(buildStep.getCertificate());
+                            }
+                        }));
+                    if (builder.length() > 0)
+                        return;
+
+
+
                     TrustManager[] trustAllCerts = new TrustManager[] {
                             new X509TrustManager() {
                                 public java.security.cert.X509Certificate[] getAcceptedIssuers() {
@@ -274,7 +325,7 @@ public class Connector {
                                 }, this));
                         conn = (HttpsURLConnection)url.openConnection();
                         conn.connect();
-                        System.out.println("Self-Signed Certificate\n");
+                        System.out.println("Self-Signed certificate\n");
                     }
                     catch (Throwable t)
                     {
